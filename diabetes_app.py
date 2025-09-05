@@ -16,18 +16,17 @@ st.set_page_config(
 # Load the trained model and preprocessing objects
 @st.cache_resource
 def load_model():
-    model = joblib.load('optimized_random_forest.pkl')
-    scaler = joblib.load('scaler.pkl')
-    power_transformer = joblib.load('power_transformer.pkl')
-    with open('selected_features.json', 'r') as f:
-        selected_features = json.load(f)
-    return model, scaler, power_transformer, selected_features
+    try:
+        model = joblib.load('optimized_random_forest.pkl')
+        scaler = joblib.load('scaler.pkl')
+        power_transformer = joblib.load('power_transformer.pkl')
+        with open('selected_features.json', 'r') as f:
+            selected_features = json.load(f)
+        return model, scaler, power_transformer, selected_features
+    except:
+        return None, None, None, None
 
-try:
-    model, scaler, power_transformer, selected_features = load_model()
-except:
-    st.error("❌ Model files not found. Please make sure you have the trained model files.")
-    st.stop()
+model, scaler, power_transformer, selected_features = load_model()
 
 # App title and description
 st.title("🩺 Diabetes Prediction App")
@@ -35,6 +34,17 @@ st.markdown("""
 This app predicts the likelihood of diabetes based on health metrics.
 Enter your health information below and click 'Predict' to see the results.
 """)
+
+# Show warning if model files aren't loaded
+if model is None:
+    st.error("""
+    ❌ Model files not found. Please make sure you have these files in the same directory:
+    - optimized_random_forest.pkl
+    - scaler.pkl  
+    - power_transformer.pkl
+    - selected_features.json
+    """)
+    st.stop()
 
 # Create two columns for layout
 col1, col2 = st.columns(2)
@@ -49,56 +59,112 @@ with col1:
     skin_thickness = st.slider("Skin Thickness (mm)", 0, 100, 20)
     insulin = st.slider("Insulin Level (mu U/ml)", 0, 850, 80)
     bmi = st.slider("BMI", 0.0, 70.0, 25.0, 0.1)
-    diabetes_pedigree = st.slider("Diabetes Pedigree Function", 0.0, 2.5, 0.5, 0.01)
     age = st.slider("Age", 20, 100, 30)
 
 with col2:
-    st.header("Additional Features")
+    st.header("Family History Assessment")
     
-    # Calculate derived features (same as in your training)
-    glucose_bmi = glucose * bmi
-    age_glucose = age * glucose
-    bp_bmi = blood_pressure * bmi
-    insulin_glucose = insulin * glucose
-    glucose_insulin_ratio = glucose / (insulin + 1) if insulin != 0 else glucose
-    bmi_age_ratio = bmi / age if age != 0 else bmi
-    preg_age_ratio = pregnancies / (age + 1) if age != 0 else pregnancies
-    glucose_sq = glucose ** 2
-    bmi_sq = bmi ** 2
-    age_sq = age ** 2
-    metabolic_risk = (glucose / 100) + (bmi / 30) + (age / 50)
-    insulin_resistance = (glucose * insulin) / 405 if insulin != 0 else 0
+    st.write("Select all family members who have been diagnosed with diabetes:")
     
-    # Display calculated features (read-only)
-    st.info("Calculated Features:")
-    st.write(f"Glucose × BMI: {glucose_bmi:.2f}")
-    st.write(f"Age × Glucose: {age_glucose:.2f}")
-    st.write(f"Metabolic Risk Score: {metabolic_risk:.2f}")
+    # Family history checkboxes
+    col2a, col2b = st.columns(2)
     
-    # Add categorical features (dummy variables)
-    glucose_level = "Normal"
-    if glucose > 300:
-        glucose_level = "Severe"
-    elif glucose > 125:
-        glucose_level = "Diabetic"
-    elif glucose > 100:
-        glucose_level = "Prediabetic"
+    with col2a:
+        st.subheader("Immediate Family")
+        mother = st.checkbox("Mother")
+        father = st.checkbox("Father") 
+        sister = st.checkbox("Sister")
+        brother = st.checkbox("Brother")
     
-    bmi_category = "Normal"
-    if bmi > 30:
-        bmi_category = "Obese"
-    elif bmi > 25:
-        bmi_category = "Overweight"
-    elif bmi < 18.5:
-        bmi_category = "Underweight"
+    with col2b:
+        st.subheader("Extended Family")
+        maternal_grandmother = st.checkbox("Maternal Grandmother")
+        maternal_grandfather = st.checkbox("Maternal Grandfather")
+        paternal_grandmother = st.checkbox("Paternal Grandmother")
+        paternal_grandfather = st.checkbox("Paternal Grandfather")
+        other_relative = st.checkbox("Other close relative (aunt/uncle)")
+
+    # Calculate Diabetes Pedigree Function based on family history
+    dpf_score = 0.0
+
+    # Immediate family (higher weight)
+    if mother or father:
+        dpf_score += 0.8  # Strong genetic link from parents
+    if sister or brother:
+        dpf_score += 0.6  # Siblings also indicate strong genetic risk
+
+    # Grandparents (medium weight)
+    grandparents_count = sum([maternal_grandmother, maternal_grandfather, 
+                             paternal_grandmother, paternal_grandfather])
+    dpf_score += grandparents_count * 0.3
+
+    # Other relatives (small weight)
+    if other_relative:
+        dpf_score += 0.2
+
+    # Additional risk for multiple affected immediate family members
+    immediate_count = sum([mother, father, sister, brother])
+    if immediate_count >= 2:
+        dpf_score += 0.4  # Strong family pattern
+
+    # Cap the score at 2.5 (maximum in the original dataset)
+    dpf_score = min(dpf_score, 2.5)
     
-    age_group = "20-30"
-    if age > 50:
-        age_group = "50+"
-    elif age > 40:
-        age_group = "40-50"
-    elif age > 30:
-        age_group = "30-40"
+    # Ensure minimum score is 0.0
+    dpf_score = max(dpf_score, 0.0)
+
+    # Display the calculated score with interpretation
+    st.subheader("Genetic Risk Assessment")
+    st.info(f"**Calculated Genetic Risk Score: {dpf_score:.2f}/2.50**")
+    
+    # Interpretation guide
+    if dpf_score < 0.5:
+        st.write("📊 **Interpretation:** Low genetic risk")
+    elif dpf_score < 1.2:
+        st.write("📊 **Interpretation:** Moderate genetic risk")
+    elif dpf_score < 2.0:
+        st.write("📊 **Interpretation:** High genetic risk")
+    else:
+        st.write("📊 **Interpretation:** Very high genetic risk")
+
+# Calculate derived features (same as in your training)
+glucose_bmi = glucose * bmi
+age_glucose = age * glucose
+bp_bmi = blood_pressure * bmi
+insulin_glucose = insulin * glucose
+glucose_insulin_ratio = glucose / (insulin + 1) if insulin != 0 else glucose
+bmi_age_ratio = bmi / age if age != 0 else bmi
+preg_age_ratio = pregnancies / (age + 1) if age != 0 else pregnancies
+glucose_sq = glucose ** 2
+bmi_sq = bmi ** 2
+age_sq = age ** 2
+metabolic_risk = (glucose / 100) + (bmi / 30) + (age / 50)
+insulin_resistance = (glucose * insulin) / 405 if insulin != 0 else 0
+
+# Add categorical features (dummy variables)
+glucose_level = "Normal"
+if glucose > 300:
+    glucose_level = "Severe"
+elif glucose > 125:
+    glucose_level = "Diabetic"
+elif glucose > 100:
+    glucose_level = "Prediabetic"
+
+bmi_category = "Normal"
+if bmi > 30:
+    bmi_category = "Obese"
+elif bmi > 25:
+    bmi_category = "Overweight"
+elif bmi < 18.5:
+    bmi_category = "Underweight"
+
+age_group = "20-30"
+if age > 50:
+    age_group = "50+"
+elif age > 40:
+    age_group = "40-50"
+elif age > 30:
+    age_group = "30-40"
 
 # Create a dictionary with all features
 input_data = {
@@ -108,7 +174,7 @@ input_data = {
     'SkinThickness': skin_thickness,
     'Insulin': insulin,
     'BMI': bmi,
-    'DiabetesPedigreeFunction': diabetes_pedigree,
+    'DiabetesPedigreeFunction': dpf_score,  # Using calculated score
     'Age': age,
     'Glucose_BMI': glucose_bmi,
     'Age_Glucose': age_glucose,
@@ -153,23 +219,60 @@ if st.button("Predict Diabetes Risk", type="primary"):
         # Display results
         st.subheader("Prediction Results")
         
-        if prediction[0] == 1:
-            st.error(f"🟥 High risk of diabetes ({prediction_proba[0][1]*100:.2f}% probability)")
-            st.warning("Please consult with a healthcare professional for further evaluation.")
-        else:
-            st.success(f"🟩 Low risk of diabetes ({prediction_proba[0][0]*100:.2f}% probability)")
-            st.info("Maintain a healthy lifestyle with regular exercise and balanced diet.")
+        # Create a visual risk meter
+        risk_percentage = prediction_proba[0][1] * 100
         
-        # Show probability breakdown
-        st.write("Probability Breakdown:")
-        prob_df = pd.DataFrame({
-            'Class': ['No Diabetes', 'Diabetes'],
-            'Probability': [prediction_proba[0][0], prediction_proba[0][1]]
+        if prediction[0] == 1:
+            st.error(f"🟥 **High risk of diabetes ({risk_percentage:.1f}% probability)**")
+            st.warning("""
+            **Recommendations:**
+            - Please consult with a healthcare professional for further evaluation
+            - Consider getting a HbA1c test for accurate diagnosis
+            - Monitor your blood sugar levels regularly
+            """)
+        else:
+            st.success(f"🟩 **Low risk of diabetes ({100-risk_percentage:.1f}% probability)**")
+            st.info("""
+            **Recommendations:**
+            - Maintain a healthy lifestyle with regular exercise and balanced diet
+            - Continue with regular health checkups
+            - Be aware of diabetes symptoms and risk factors
+            """)
+        
+        # Show probability breakdown with a gauge chart
+        st.write("**Risk Probability Breakdown:**")
+        prob_data = pd.DataFrame({
+            'Risk Level': ['Low Risk', 'High Risk'],
+            'Probability': [prediction_proba[0][0] * 100, prediction_proba[0][1] * 100]
         })
-        st.bar_chart(prob_df.set_index('Class'))
+        
+        # Display as a bar chart
+        st.bar_chart(prob_data.set_index('Risk Level'))
+        
+        # Show key contributing factors
+        st.subheader("Key Contributing Factors")
+        
+        factors = []
+        if glucose > 125:
+            factors.append(f"High glucose level ({glucose} mg/dL)")
+        if bmi > 30:
+            factors.append(f"High BMI ({bmi}) - Obese range")
+        elif bmi > 25:
+            factors.append(f"Elevated BMI ({bmi}) - Overweight range")
+        if dpf_score > 1.0:
+            factors.append(f"Strong family history (score: {dpf_score:.2f})")
+        if age > 45:
+            factors.append(f"Age ({age} - increased risk category)")
+        
+        if factors:
+            for factor in factors:
+                st.write(f"• {factor}")
+        else:
+            st.write("• No major risk factors identified from your inputs")
         
     except Exception as e:
         st.error(f"An error occurred during prediction: {str(e)}")
+        st.info("Please make sure all required model files are in the same directory.")
 
 # Add some information about diabetes
 with st.expander("ℹ️ About Diabetes and Risk Factors"):
@@ -177,12 +280,18 @@ with st.expander("ℹ️ About Diabetes and Risk Factors"):
     **Diabetes** is a chronic condition that affects how your body turns food into energy.
     
     **Key Risk Factors:**
-    - High glucose levels
-    - Obesity or high BMI
-    - Family history of diabetes
-    - High blood pressure
-    - Age (risk increases with age)
-    - Gestational diabetes during pregnancy
+    - **High glucose levels** (≥126 mg/dL when fasting)
+    - **Obesity or high BMI** (BMI ≥30 significantly increases risk)
+    - **Family history** of diabetes (immediate relatives)
+    - **High blood pressure** (≥140/90 mmHg)
+    - **Age** (risk increases significantly after 45 years)
+    - **Gestational diabetes** during pregnancy
+    
+    **Normal Health Ranges:**
+    - Glucose: <100 mg/dL (fasting)
+    - BMI: 18.5-24.9
+    - Blood Pressure: <120/80 mmHg
+    - Insulin: 2.6-24.9 μU/mL
     
     **Disclaimer:** This prediction is based on a machine learning model and should not replace 
     professional medical advice. Always consult with healthcare professionals for proper diagnosis.
