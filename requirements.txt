@@ -5,5 +5,5 @@ scikit-learn
 imbalanced-learn
 joblib
 matplotlib
-plotly
 seaborn
+
